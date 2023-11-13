@@ -18,6 +18,11 @@ class G(object):
 
 g = G()
 
+def try_get_text(node, default=""):
+    if node is None:
+        return default
+    else:
+        return node.text
 
 def unescape_xml(xml):
     return xml.decode().replace('&lt;', '<').replace('&gt;', '>').replace('&quot;', '"')

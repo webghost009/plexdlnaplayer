@@ -9,8 +9,10 @@ import aiohttp
 from aiohttp import ClientConnectorError
 
 from plex.adapters import remove_adapter
-from utils import xml2dict, UPNP_RC_SERVICE_TYPE, UPNP_AVT_SERVICE_TYPE, g
+from utils import xml2dict, try_get_text, UPNP_RC_SERVICE_TYPE, UPNP_AVT_SERVICE_TYPE, g
 from settings import settings
+
+import xml.etree.ElementTree as etree
 
 PAYLOAD_FMT = '<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" ' \
               's:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:{action} xmlns:u="{urn}">' \
@@ -33,11 +35,11 @@ devices = []
 
 class DlnaDeviceService(object):
 
-    def __init__(self, service_dict: dict, device):
-        self.service_type = service_dict['serviceType']
-        self.control_url = urljoin(device.location_url, service_dict['controlURL'])
-        self.event_url = urljoin(device.location_url, service_dict['eventSubURL'])
-        self.spec_url = urljoin(device.location_url, service_dict['SCPDURL'])
+    def __init__(self, service, device):
+        self.service_type = try_get_text(service.find('serviceType'))
+        self.control_url = urljoin(device.location_url, try_get_text(service.find('controlURL')))
+        self.event_url = urljoin(device.location_url, try_get_text(service.find('eventSubURL')))
+        self.spec_url = urljoin(device.location_url, try_get_text(service.find('SCPDURL')))
         self.urn = self.service_type
         self.device = device
         self.subscribed = False
@@ -178,15 +180,22 @@ class DlnaDevice(object):
                 if response.ok:
                     xml = await response.text()
                     xml = re.sub(" xmlns=\"[^\"]+\"", "", xml, count=1)
-                    info = xml2dict(xml)
-                    info = info['root']
-                    self.info = info
+                    xml = etree.fromstring(xml)
+            # Find the MediaRenderer device
+            for device in xml.iterfind('.//device'):
+                deviceType = device.find('deviceType')
+                if "MediaRenderer" in deviceType.text:
+                    self.info = device
+                    break
             if self.info:
-                self.name = self.info['device']['friendlyName']
-                self.model = self.info['device'].get('modelDescription', settings.product)
-                self.uuid = self.info['device']['UDN'][len("uuid:"):]
-                for service in self.info['device']['serviceList']['service']:
-                    self.services[service['serviceType']] = DlnaDeviceService(service, self)
+                self.name = try_get_text(self.info.find('friendlyName'))
+                self.model = try_get_text(self.info.find('modelDescription'))
+                if not self.model:
+                    self.model = try_get_text(self.info.find('modelName'), settings.product)
+                self.uuid = try_get_text(self.info.find('UDN'))[len("uuid:"):]
+                services = self.info.iterfind('.//service')
+                for service in services:
+                    self.services[service.find('serviceType').text] = DlnaDeviceService(service, self)
             if not self.name or not self.uuid:
                 raise Exception(f"not valid dlna device {self.location_url}")
             if UPNP_AVT_SERVICE_TYPE not in self.services or UPNP_RC_SERVICE_TYPE not in self.services:

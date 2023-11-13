@@ -27,7 +27,7 @@ s = plex_server
 
 
 async def on_new_dlna_device(location_url):
-    print(f"got new dlna deviec location url {location_url}")
+    print(f"got new dlna device location url {location_url}")
     for d in devices:
         if d.location_url == location_url:
             return
